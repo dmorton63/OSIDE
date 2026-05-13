@@ -20,6 +20,8 @@ const treeListStyle: CSSProperties = {
 const treeItemStyle: CSSProperties = {
   display: 'grid',
   gap: '0.35rem',
+  paddingLeft: '0.35rem',
+  borderLeft: '2px solid transparent',
 };
 
 const treeLabelStyle: CSSProperties = {
@@ -37,28 +39,50 @@ const treeButtonStyle: CSSProperties = {
   font: 'inherit',
 };
 
+function nodeContainsActiveFile(node: WorkspaceNode, activeFilePath: string | null): boolean {
+  if (!activeFilePath) {
+    return false;
+  }
+
+  if (node.kind === 'file') {
+    return node.path === activeFilePath;
+  }
+
+  return node.children?.some((child) => nodeContainsActiveFile(child, activeFilePath)) ?? false;
+}
+
 function WorkspaceTree({ nodes, activeFilePath, onOpenFile }: { nodes: WorkspaceNode[]; activeFilePath: string | null; onOpenFile: (filePath: string) => void }) {
   return (
     <ul style={treeListStyle}>
-      {nodes.map((node) => (
-        <li key={node.path} style={treeItemStyle}>
-          {node.kind === 'directory' ? (
-            <span style={treeLabelStyle}>{`/${node.name}`}</span>
-          ) : (
-            <button
-              type="button"
-              style={{
-                ...treeButtonStyle,
-                color: activeFilePath === node.path ? '#8dd694' : '#b7c6d9',
-              }}
-              onClick={() => onOpenFile(node.path)}
-            >
-              {node.name}
-            </button>
-          )}
-          {node.children && node.children.length > 0 ? <WorkspaceTree nodes={node.children} activeFilePath={activeFilePath} onOpenFile={onOpenFile} /> : null}
-        </li>
-      ))}
+      {nodes.map((node) => {
+        const isActiveBranch = nodeContainsActiveFile(node, activeFilePath);
+
+        return (
+          <li
+            key={node.path}
+            style={{
+              ...treeItemStyle,
+              borderLeftColor: isActiveBranch ? '#8dd694' : 'transparent',
+            }}
+          >
+            {node.kind === 'directory' ? (
+              <span style={{ ...treeLabelStyle, color: isActiveBranch ? '#8dd694' : '#b7c6d9', fontWeight: isActiveBranch ? 600 : 400 }}>{`/${node.name}`}</span>
+            ) : (
+              <button
+                type="button"
+                style={{
+                  ...treeButtonStyle,
+                  color: activeFilePath === node.path ? '#8dd694' : '#b7c6d9',
+                }}
+                onClick={() => onOpenFile(node.path)}
+              >
+                {node.name}
+              </button>
+            )}
+            {node.children && node.children.length > 0 ? <WorkspaceTree nodes={node.children} activeFilePath={activeFilePath} onOpenFile={onOpenFile} /> : null}
+          </li>
+        );
+      })}
     </ul>
   );
 }

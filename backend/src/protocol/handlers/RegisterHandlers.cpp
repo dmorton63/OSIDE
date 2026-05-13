@@ -24,6 +24,12 @@ void RegisterHandlers(MessageRouter& router) {
   router.Register("debug.stepOut", [](std::string_view) {
     return std::string("debug.stepOut accepted");
   });
+  router.Register("debug.setBreakpoint", [](std::string_view) {
+    return std::string("debug.setBreakpoint accepted");
+  });
+  router.Register("debug.clearBreakpoint", [](std::string_view) {
+    return std::string("debug.clearBreakpoint accepted");
+  });
   router.Register("debug.stop", [](std::string_view) {
     return std::string("debug.stop accepted");
   });

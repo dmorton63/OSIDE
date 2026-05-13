@@ -269,6 +269,25 @@ export function DebugSessionProvider({ children }: PropsWithChildren) {
         breakpoints: [...current.breakpoints.filter((entry) => entry.id !== breakpoint.id), breakpoint],
       }));
     });
+
+    protocol.registerHandler('debug.breakpointsUpdated', (payload) => {
+      if (!isRecord(payload) || !Array.isArray(payload.breakpoints)) {
+        return;
+      }
+
+      const breakpoints = payload.breakpoints.filter(isRecord).map((breakpoint): DebugBreakpoint => ({
+        id: String(breakpoint.id ?? 'breakpoint'),
+        fileId: String(breakpoint.fileId ?? ''),
+        line: Number(breakpoint.line ?? 0),
+        enabled: Boolean(breakpoint.enabled),
+        condition: typeof breakpoint.condition === 'string' ? breakpoint.condition : undefined,
+      }));
+
+      setDebugState((current) => ({
+        ...appendActivity(current, `event: debug.breakpointsUpdated (${breakpoints.length} breakpoints)`),
+        breakpoints,
+      }));
+    });
   }, [protocol]);
 
   const value = useMemo<DebugSessionContextValue>(
@@ -282,32 +301,25 @@ export function DebugSessionProvider({ children }: PropsWithChildren) {
         }));
       },
       toggleBreakpoint: (fileId: string, line: number) => {
-        setDebugState((current) => {
-          const existing = current.breakpoints.find((entry) => entry.fileId === fileId && entry.line === line);
-          const breakpoints = existing
-            ? current.breakpoints.filter((entry) => !(entry.fileId === fileId && entry.line === line))
-            : [
-                ...current.breakpoints,
-                {
-                  id: `bp-${fileId.replace(/[^a-zA-Z0-9]+/g, '-')}-${line}`,
-                  fileId,
-                  line,
-                  enabled: true,
-                },
-              ];
+        const existing = debugState.breakpoints.find((entry) => entry.fileId === fileId && entry.line === line);
+        const type = existing ? 'debug.clearBreakpoint' : 'debug.setBreakpoint';
 
-          const activityMessage = existing
-            ? `breakpoint cleared (${fileId}:${line})`
-            : `breakpoint set (${fileId}:${line})`;
+        setDebugState((current) => ({
+          ...current,
+          activity: [`command: ${type} (${fileId}:${line})`, ...current.activity].slice(0, 8),
+        }));
 
-          return {
-            ...appendActivity(current, activityMessage, false),
-            breakpoints,
-          };
+        protocol.sendMessage({
+          protocolVersion: '1.0.0',
+          type,
+          payload: {
+            fileId,
+            line,
+          },
         });
       },
     }),
-    [debugState],
+    [debugState, protocol],
   );
 
   return <DebugSessionContext.Provider value={value}>{children}</DebugSessionContext.Provider>;
