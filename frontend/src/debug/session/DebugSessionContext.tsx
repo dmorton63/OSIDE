@@ -60,6 +60,7 @@ export type DebugSessionState = {
 type DebugSessionContextValue = {
   state: DebugSessionState;
   recordCommand: (command: string) => void;
+  toggleBreakpoint: (fileId: string, line: number) => void;
 };
 
 const initialDebugState: DebugSessionState = {
@@ -87,6 +88,7 @@ const initialDebugState: DebugSessionState = {
 const DebugSessionContext = createContext<DebugSessionContextValue>({
   state: initialDebugState,
   recordCommand: () => {},
+  toggleBreakpoint: () => {},
 });
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -278,6 +280,31 @@ export function DebugSessionProvider({ children }: PropsWithChildren) {
           pendingCommand: command,
           activity: [`command: ${command}`, ...current.activity].slice(0, 8),
         }));
+      },
+      toggleBreakpoint: (fileId: string, line: number) => {
+        setDebugState((current) => {
+          const existing = current.breakpoints.find((entry) => entry.fileId === fileId && entry.line === line);
+          const breakpoints = existing
+            ? current.breakpoints.filter((entry) => !(entry.fileId === fileId && entry.line === line))
+            : [
+                ...current.breakpoints,
+                {
+                  id: `bp-${fileId.replace(/[^a-zA-Z0-9]+/g, '-')}-${line}`,
+                  fileId,
+                  line,
+                  enabled: true,
+                },
+              ];
+
+          const activityMessage = existing
+            ? `breakpoint cleared (${fileId}:${line})`
+            : `breakpoint set (${fileId}:${line})`;
+
+          return {
+            ...appendActivity(current, activityMessage, false),
+            breakpoints,
+          };
+        });
       },
     }),
     [debugState],

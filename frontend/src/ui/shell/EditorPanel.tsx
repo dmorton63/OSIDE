@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react';
 
-import { useDebugSessionState } from '../../debug/session/DebugSessionContext';
+import { useDebugSession, useDebugSessionState } from '../../debug/session/DebugSessionContext';
 import { useWorkspaceActions } from '../../workspace/state/WorkspaceContext';
 import { useWorkspaceState } from '../../workspace/state/WorkspaceContext';
 
@@ -75,6 +75,7 @@ function normalizeWorkspacePath(path: string, rootPath: string): string {
 export function EditorPanel() {
   const workspace = useWorkspaceState();
   const workspaceActions = useWorkspaceActions();
+  const debugSession = useDebugSession();
   const debug = useDebugSessionState();
   const openTabs = workspace.openFilePaths;
   const activeFile = workspace.activeFilePath ?? openTabs[0] ?? null;
@@ -135,7 +136,9 @@ export function EditorPanel() {
                       ...breakpointStyle,
                       background: hasBreakpoint ? '#ff8f8f' : 'transparent',
                       border: hasBreakpoint ? '1px solid #ffb3b3' : '1px solid transparent',
+                      cursor: activeFile ? 'pointer' : 'default',
                     }}
+                    onClick={activeFile ? () => debugSession.toggleBreakpoint(activeFile, lineNumber) : undefined}
                   />
                   <span style={{ ...lineNumberStyle, color: isActiveLine ? '#8dd694' : '#526273' }}>{lineNumber}</span>
                   <span style={{ color: isActiveLine ? '#f6fff6' : '#dce6f2', whiteSpace: 'pre-wrap' }}>{line || ' '}</span>
