@@ -44,10 +44,18 @@ const codeFrameStyle: CSSProperties = {
 
 const codeLineStyle: CSSProperties = {
   display: 'grid',
-  gridTemplateColumns: '3.25rem 1fr',
-  gap: '0.9rem',
+  gridTemplateColumns: '1rem 3.25rem 1fr',
+  gap: '0.75rem',
   padding: '0.02rem 1rem',
   alignItems: 'baseline',
+};
+
+const breakpointStyle: CSSProperties = {
+  width: '0.6rem',
+  height: '0.6rem',
+  borderRadius: '999px',
+  justifySelf: 'center',
+  alignSelf: 'center',
 };
 
 const lineNumberStyle: CSSProperties = {
@@ -75,6 +83,9 @@ export function EditorPanel() {
     : null;
   const activeContent = activeFile ? workspace.fileContents[activeFile] ?? '' : '';
   const previewLines = activeFile ? activeContent.split(/\r?\n/) : [];
+  const activeBreakpoints = activeFile
+    ? debug.breakpoints.filter((breakpoint) => normalizeWorkspacePath(breakpoint.fileId, workspace.rootPath) === activeFile)
+    : [];
 
   return (
     <div style={panelStyle}>
@@ -108,6 +119,7 @@ export function EditorPanel() {
             {previewLines.map((line, index) => {
               const lineNumber = index + 1;
               const isActiveLine = lineNumber === activeLine;
+              const hasBreakpoint = activeBreakpoints.some((breakpoint) => breakpoint.line === lineNumber && breakpoint.enabled);
 
               return (
                 <div
@@ -118,6 +130,13 @@ export function EditorPanel() {
                     borderLeft: isActiveLine ? '3px solid #8dd694' : '3px solid transparent',
                   }}
                 >
+                  <span
+                    style={{
+                      ...breakpointStyle,
+                      background: hasBreakpoint ? '#ff8f8f' : 'transparent',
+                      border: hasBreakpoint ? '1px solid #ffb3b3' : '1px solid transparent',
+                    }}
+                  />
                   <span style={{ ...lineNumberStyle, color: isActiveLine ? '#8dd694' : '#526273' }}>{lineNumber}</span>
                   <span style={{ color: isActiveLine ? '#f6fff6' : '#dce6f2', whiteSpace: 'pre-wrap' }}>{line || ' '}</span>
                 </div>

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
 
 import { useProtocol } from '../../protocol/hooks/ProtocolContext';
@@ -79,6 +79,14 @@ export function Workbench() {
   const shellStyle = createShellStyle(layoutMode);
   const debugTarget = `${workspace.rootPath}/build/tinyos-kernel.elf`;
   const showDebugControls = (layoutMode === 'debugging' || layoutMode === 'module' || debugState.status !== 'stopped' || debugState.pendingCommand !== null);
+
+  useEffect(() => {
+    if (debugState.status !== 'paused' || !debugState.activeFrame?.filePath) {
+      return;
+    }
+
+    workspaceActions.openFile(debugState.activeFrame.filePath);
+  }, [debugState.activeFrame?.filePath, debugState.status, workspaceActions]);
 
   const sendDebugCommand = (type: string, payload: Record<string, unknown> = {}) => {
     if (protocol.connectionState !== 'connected') {
