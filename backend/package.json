@@ -1,0 +1,8 @@
+{
+  "name": "oside-backend",
+  "version": "1.0.0",
+  "scripts": {
+    "typecheck": "python3 -m mypy src/",
+    "build": "python3 -m build_backend"
+  }
+}

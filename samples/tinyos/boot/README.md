@@ -1,0 +1,1 @@
+# tinyos boot assets

@@ -1,0 +1,13 @@
+{
+  "name": "os-project-template",
+  "type": "oside.os-project",
+  "toolchainPrefix": "x86_64-elf-",
+  "includePaths": [
+    "include",
+    "modules"
+  ],
+  "linkerScript": "linker.ld",
+  "modules": [
+    "kernel"
+  ]
+}
