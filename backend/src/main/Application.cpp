@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <optional>
 #include <sstream>
@@ -98,6 +99,38 @@ std::string BuildCompletePayload(std::string_view root_path, bool success) {
   return payload.str();
 }
 
+std::optional<std::string> ReadTextFile(const std::filesystem::path& file_path) {
+  std::ifstream input(file_path);
+  if (!input) {
+    return std::nullopt;
+  }
+
+  std::ostringstream buffer;
+  buffer << input.rdbuf();
+  return buffer.str();
+}
+
+std::optional<std::filesystem::path> ResolveProjectFilePath(std::string_view root_path, std::string_view file_path) {
+  if (root_path.empty() || file_path.empty()) {
+    return std::nullopt;
+  }
+
+  const auto canonical_root = std::filesystem::weakly_canonical(std::filesystem::path(root_path));
+  const auto candidate = canonical_root / std::filesystem::path(file_path);
+  const auto canonical_candidate = std::filesystem::weakly_canonical(candidate);
+  const auto root_text = canonical_root.generic_string();
+  const auto candidate_text = canonical_candidate.generic_string();
+  if (candidate_text != root_text && candidate_text.rfind(root_text + "/", 0) != 0) {
+    return std::nullopt;
+  }
+
+  if (!std::filesystem::is_regular_file(canonical_candidate)) {
+    return std::nullopt;
+  }
+
+  return canonical_candidate;
+}
+
 std::string WorkspaceTreePayload(const workspace::ProjectTreeNode& node) {
   std::ostringstream payload;
   payload << "{\"name\":\"" << EscapeJson(node.name)
@@ -148,6 +181,14 @@ std::string ProjectMetadataPayload(const workspace::ProjectMetadata& metadata) {
     payload << WorkspaceTreePayload(metadata.tree[index]);
   }
   payload << "]}";
+  return payload.str();
+}
+
+std::string ProjectFilePayload(std::string_view file_path, std::string_view content) {
+  std::ostringstream payload;
+  payload << "{\"filePath\":\"" << EscapeJson(file_path)
+          << "\",\"content\":\"" << EscapeJson(content)
+          << "\"}";
   return payload.str();
 }
 
@@ -306,6 +347,23 @@ int Application::Run() {
       }
 
       server.PublishMessage(Envelope("project.metadataLoaded", ProjectMetadataPayload(*metadata)));
+      return;
+    }
+
+    if (type == "project.readFile") {
+      const auto root_path = ExtractJsonStringField(raw, "rootPath");
+      const auto file_path = ExtractJsonStringField(raw, "filePath");
+      const auto resolved_file = ResolveProjectFilePath(root_path, file_path);
+      if (!resolved_file.has_value()) {
+        return;
+      }
+
+      const auto content = ReadTextFile(*resolved_file);
+      if (!content.has_value()) {
+        return;
+      }
+
+      server.PublishMessage(Envelope("project.fileLoaded", ProjectFilePayload(file_path, *content)));
       return;
     }
 

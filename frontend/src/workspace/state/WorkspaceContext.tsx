@@ -18,11 +18,15 @@ export type WorkspaceState = {
   modules: string[];
   rootPath: string;
   tree: WorkspaceNode[];
+  activeFilePath: string | null;
+  openFilePaths: string[];
+  fileContents: Record<string, string>;
 };
 
 type WorkspaceContextValue = {
   state: WorkspaceState;
   loadProject: (rootPath: string) => void;
+  openFile: (filePath: string) => void;
 };
 
 const initialWorkspaceState: WorkspaceState = {
@@ -72,29 +76,79 @@ const initialWorkspaceState: WorkspaceState = {
     { name: 'project.json', path: 'samples/tinyos/project.json', kind: 'file' },
     { name: 'linker.ld', path: 'samples/tinyos/linker.ld', kind: 'file' },
   ],
+  activeFilePath: 'samples/tinyos/src/kernel.cpp',
+  openFilePaths: ['samples/tinyos/src/kernel.cpp'],
+  fileContents: {},
 };
 
 const WorkspaceContext = createContext<WorkspaceContextValue>({
   state: initialWorkspaceState,
   loadProject: () => {},
+  openFile: () => {},
 });
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
+function normalizeWorkspacePath(path: string, rootPath: string): string {
+  if (path.startsWith(`${rootPath}/`)) {
+    return path.slice(rootPath.length + 1);
+  }
+
+  return path;
+}
+
+function findFirstFile(nodes: WorkspaceNode[]): string | null {
+  for (const node of nodes) {
+    if (node.kind === 'file') {
+      return node.path;
+    }
+
+    if (node.children) {
+      const candidate = findFirstFile(node.children);
+      if (candidate) {
+        return candidate;
+      }
+    }
+  }
+
+  return null;
+}
+
 export function WorkspaceProvider({ children }: PropsWithChildren): ReactNode {
   const protocol = useProtocol();
   const [workspaceState, setWorkspaceState] = useState<WorkspaceState>(initialWorkspaceState);
-  const lastRequestedRootPathRef = useRef(initialWorkspaceState.rootPath);
+  const rootPathRef = useRef(initialWorkspaceState.rootPath);
 
   const loadProject = (rootPath: string) => {
-    lastRequestedRootPathRef.current = rootPath;
+    rootPathRef.current = rootPath;
     protocol.sendMessage({
       protocolVersion: '1.0.0',
       type: 'project.loadMetadata',
       payload: {
         rootPath,
+      },
+    });
+  };
+
+  const openFile = (filePath: string) => {
+    const normalizedFilePath = normalizeWorkspacePath(filePath, rootPathRef.current);
+
+    setWorkspaceState((current) => ({
+      ...current,
+      activeFilePath: normalizedFilePath,
+      openFilePaths: current.openFilePaths.includes(normalizedFilePath)
+        ? current.openFilePaths
+        : [...current.openFilePaths, normalizedFilePath],
+    }));
+
+    protocol.sendMessage({
+      protocolVersion: '1.0.0',
+      type: 'project.readFile',
+      payload: {
+        rootPath: rootPathRef.current,
+        filePath: normalizedFilePath,
       },
     });
   };
@@ -135,23 +189,62 @@ export function WorkspaceProvider({ children }: PropsWithChildren): ReactNode {
       const tree = Array.isArray(payload.tree)
         ? payload.tree.map(parseTreeNode).filter((entry): entry is WorkspaceNode => entry !== null)
         : undefined;
+      const nextRootPath = typeof payload.rootPath === 'string' ? payload.rootPath : rootPathRef.current;
+      const firstFilePath = tree ? findFirstFile(tree) : null;
+
+      rootPathRef.current = nextRootPath;
 
       setWorkspaceState((current) => ({
         ...current,
         projectName,
         projectType,
         toolchainPrefix,
-        rootPath: typeof payload.rootPath === 'string' ? payload.rootPath : current.rootPath,
+        rootPath: nextRootPath,
         includePaths: Array.isArray(payload.includePaths)
           ? payload.includePaths.filter((entry): entry is string => typeof entry === 'string')
           : current.includePaths,
         modules: Array.isArray(payload.modules) ? payload.modules.filter((entry): entry is string => typeof entry === 'string') : current.modules,
         tree: tree ?? current.tree,
+        activeFilePath: firstFilePath ?? current.activeFilePath,
+        openFilePaths: firstFilePath ? [firstFilePath] : current.openFilePaths,
+        fileContents: firstFilePath && current.activeFilePath !== firstFilePath ? {} : current.fileContents,
+      }));
+
+      if (firstFilePath) {
+        protocol.sendMessage({
+          protocolVersion: '1.0.0',
+          type: 'project.readFile',
+          payload: {
+            rootPath: nextRootPath,
+            filePath: firstFilePath,
+          },
+        });
+      }
+    });
+
+    protocol.registerHandler('project.fileLoaded', (payload) => {
+      if (!isRecord(payload) || typeof payload.filePath !== 'string' || typeof payload.content !== 'string') {
+        return;
+      }
+
+      const filePath = payload.filePath;
+      const content = payload.content;
+
+      setWorkspaceState((current) => ({
+        ...current,
+        activeFilePath: current.activeFilePath ?? filePath,
+        openFilePaths: current.openFilePaths.includes(filePath)
+          ? current.openFilePaths
+          : [...current.openFilePaths, filePath],
+        fileContents: {
+          ...current.fileContents,
+          [filePath]: content,
+        },
       }));
     });
   }, [protocol]);
 
-  const value = useMemo<WorkspaceContextValue>(() => ({ state: workspaceState, loadProject }), [workspaceState, loadProject]);
+  const value = useMemo<WorkspaceContextValue>(() => ({ state: workspaceState, loadProject, openFile }), [workspaceState, loadProject, openFile]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }
@@ -161,5 +254,6 @@ export function useWorkspaceState() {
 }
 
 export function useWorkspaceActions() {
-  return { loadProject: useContext(WorkspaceContext).loadProject };
+  const context = useContext(WorkspaceContext);
+  return { loadProject: context.loadProject, openFile: context.openFile };
 }

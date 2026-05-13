@@ -1,34 +1,8 @@
 import type { CSSProperties } from 'react';
 
 import { useDebugSessionState } from '../../debug/session/DebugSessionContext';
+import { useWorkspaceActions } from '../../workspace/state/WorkspaceContext';
 import { useWorkspaceState } from '../../workspace/state/WorkspaceContext';
-
-const kernelSourceLines = [
-  '#include "kernel.hpp"',
-  '',
-  'namespace {',
-  '',
-  'int DetectBootStage() {',
-  '  return 1;',
-  '}',
-  '',
-  'bool InitializeScheduler(int bootStage) {',
-  '  return bootStage > 1;',
-  '}',
-  '',
-  '} // namespace',
-  '',
-  'int KernelMain() {',
-  '  int bootStage = DetectBootStage();',
-  '  bool schedulerReady = InitializeScheduler(bootStage);',
-  '  int statusCode = schedulerReady ? 0 : bootStage;',
-  '  return statusCode;',
-  '}',
-];
-
-const sourcePreviewByPath: Record<string, string[]> = {
-  'samples/tinyos/src/kernel.cpp': kernelSourceLines,
-};
 
 const panelStyle: CSSProperties = {
   display: 'grid',
@@ -88,40 +62,48 @@ function normalizeWorkspacePath(path: string, rootPath: string): string {
   }
 
   return path;
-};
+}
 
 export function EditorPanel() {
   const workspace = useWorkspaceState();
+  const workspaceActions = useWorkspaceActions();
   const debug = useDebugSessionState();
-  const openTabs = [
-    'samples/tinyos/src/kernel.cpp',
-    'samples/tinyos/include/kernel.hpp',
-    'samples/tinyos/project.json',
-  ];
-  const activeFile = normalizeWorkspacePath(debug.activeFrame?.filePath ?? openTabs[0] ?? workspace.rootPath, workspace.rootPath);
-  const activeLine = debug.activeFrame && normalizeWorkspacePath(debug.activeFrame.filePath, workspace.rootPath) === activeFile
+  const openTabs = workspace.openFilePaths;
+  const activeFile = workspace.activeFilePath ?? openTabs[0] ?? null;
+  const activeLine = debug.activeFrame && activeFile && normalizeWorkspacePath(debug.activeFrame.filePath, workspace.rootPath) === activeFile
     ? debug.activeFrame.line
     : null;
-  const previewLines = sourcePreviewByPath[activeFile];
+  const activeContent = activeFile ? workspace.fileContents[activeFile] ?? '' : '';
+  const previewLines = activeFile ? activeContent.split(/\r?\n/) : [];
 
   return (
     <div style={panelStyle}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem' }}>
         <strong>Editor</strong>
-        <span style={{ color: '#8ea0b8' }}>active file: {activeFile}</span>
+        <span style={{ color: '#8ea0b8' }}>active file: {activeFile ?? 'none'}</span>
       </div>
       <div style={tabsStyle}>
         {openTabs.map((tab) => (
-          <div key={tab} style={{ ...tabStyle, borderColor: tab === activeFile ? '#8dd694' : '#273244' }}>
+          <button
+            key={tab}
+            type="button"
+            onClick={() => workspaceActions.openFile(tab)}
+            style={{
+              ...tabStyle,
+              borderColor: tab === activeFile ? '#8dd694' : '#273244',
+              cursor: 'pointer',
+              textAlign: 'left',
+            }}
+          >
             {tab.split('/').at(-1)}
-          </div>
+          </button>
         ))}
       </div>
       <div style={editorSurfaceStyle}>
         <div style={{ color: '#8ea0b8', padding: '0 1rem' }}>
           {activeLine ? `highlighting execution at line ${activeLine}` : 'debugger is not paused on a source line'}
         </div>
-        {previewLines ? (
+        {activeFile && activeContent ? (
           <div style={codeFrameStyle}>
             {previewLines.map((line, index) => {
               const lineNumber = index + 1;
@@ -142,8 +124,10 @@ export function EditorPanel() {
               );
             })}
           </div>
+        ) : activeFile ? (
+          <pre style={{ margin: 0, color: '#8ea0b8', padding: '0 1rem' }}>Loading {activeFile}...</pre>
         ) : (
-          <pre style={{ margin: 0, color: '#dce6f2', padding: '0 1rem' }}>Preview unavailable for {activeFile}</pre>
+          <pre style={{ margin: 0, color: '#8ea0b8', padding: '0 1rem' }}>Open a file from the project tree to view source.</pre>
         )}
         {debug.activeFrame ? (
           <div style={{ color: '#f1c27d', padding: '0 1rem' }}>

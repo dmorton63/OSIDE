@@ -1,5 +1,6 @@
 import type { CSSProperties } from 'react';
 
+import { useWorkspaceActions } from '../../workspace/state/WorkspaceContext';
 import { useWorkspaceState, type WorkspaceNode } from '../../workspace/state/WorkspaceContext';
 
 const panelStyle: CSSProperties = {
@@ -26,13 +27,36 @@ const treeLabelStyle: CSSProperties = {
   fontSize: '0.95rem',
 };
 
-function WorkspaceTree({ nodes }: { nodes: WorkspaceNode[] }) {
+const treeButtonStyle: CSSProperties = {
+  border: 'none',
+  background: 'transparent',
+  color: '#b7c6d9',
+  padding: 0,
+  textAlign: 'left',
+  cursor: 'pointer',
+  font: 'inherit',
+};
+
+function WorkspaceTree({ nodes, activeFilePath, onOpenFile }: { nodes: WorkspaceNode[]; activeFilePath: string | null; onOpenFile: (filePath: string) => void }) {
   return (
     <ul style={treeListStyle}>
       {nodes.map((node) => (
         <li key={node.path} style={treeItemStyle}>
-          <span style={treeLabelStyle}>{node.kind === 'directory' ? `/${node.name}` : node.name}</span>
-          {node.children && node.children.length > 0 ? <WorkspaceTree nodes={node.children} /> : null}
+          {node.kind === 'directory' ? (
+            <span style={treeLabelStyle}>{`/${node.name}`}</span>
+          ) : (
+            <button
+              type="button"
+              style={{
+                ...treeButtonStyle,
+                color: activeFilePath === node.path ? '#8dd694' : '#b7c6d9',
+              }}
+              onClick={() => onOpenFile(node.path)}
+            >
+              {node.name}
+            </button>
+          )}
+          {node.children && node.children.length > 0 ? <WorkspaceTree nodes={node.children} activeFilePath={activeFilePath} onOpenFile={onOpenFile} /> : null}
         </li>
       ))}
     </ul>
@@ -41,13 +65,14 @@ function WorkspaceTree({ nodes }: { nodes: WorkspaceNode[] }) {
 
 export function ProjectPanel() {
   const workspace = useWorkspaceState();
+  const workspaceActions = useWorkspaceActions();
 
   return (
     <div style={panelStyle}>
       <strong>Project Tree</strong>
       <div style={{ color: '#8ea0b8' }}>{workspace.rootPath}</div>
       <div style={{ color: '#8ea0b8' }}>modules: {workspace.modules.join(', ')}</div>
-      <WorkspaceTree nodes={workspace.tree} />
+      <WorkspaceTree nodes={workspace.tree} activeFilePath={workspace.activeFilePath} onOpenFile={workspaceActions.openFile} />
     </div>
   );
 }
