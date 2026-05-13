@@ -8,9 +8,12 @@
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <optional>
 #include <sstream>
 #include <string_view>
 #include <thread>
+
+#include <citadel/workspace/ProjectMetadataLoader.hpp>
 
 namespace citadel {
 namespace {
@@ -92,6 +95,59 @@ std::string BuildCompletePayload(std::string_view root_path, bool success) {
           << "{\"kind\":\"map\",\"path\":\"" << root_path << "/build/tinyos.map\"},"
           << "{\"kind\":\"log\",\"path\":\"" << root_path << "/build/oside-build.log\"}"
           << "]}";
+  return payload.str();
+}
+
+std::string WorkspaceTreePayload(const workspace::ProjectTreeNode& node) {
+  std::ostringstream payload;
+  payload << "{\"name\":\"" << EscapeJson(node.name)
+          << "\",\"path\":\"" << EscapeJson(node.path)
+          << "\",\"kind\":\"" << (node.is_directory ? "directory" : "file") << "\"";
+
+  if (node.is_directory) {
+    payload << ",\"children\":[";
+    for (std::size_t index = 0; index < node.children.size(); ++index) {
+      if (index > 0) {
+        payload << ",";
+      }
+      payload << WorkspaceTreePayload(node.children[index]);
+    }
+    payload << "]";
+  }
+
+  payload << "}";
+  return payload.str();
+}
+
+std::string ProjectMetadataPayload(const workspace::ProjectMetadata& metadata) {
+  std::ostringstream payload;
+  payload << "{\"name\":\"" << EscapeJson(metadata.name)
+          << "\",\"type\":\"" << EscapeJson(metadata.type)
+          << "\",\"toolchainPrefix\":\"" << EscapeJson(metadata.toolchain_prefix)
+          << "\",\"linkerScript\":\"" << EscapeJson(metadata.linker_script)
+          << "\",\"rootPath\":\"" << EscapeJson(metadata.root_path)
+          << "\",\"includePaths\":[";
+  for (std::size_t index = 0; index < metadata.include_paths.size(); ++index) {
+    if (index > 0) {
+      payload << ",";
+    }
+    payload << "\"" << EscapeJson(metadata.include_paths[index]) << "\"";
+  }
+  payload << "],\"modules\":[";
+  for (std::size_t index = 0; index < metadata.modules.size(); ++index) {
+    if (index > 0) {
+      payload << ",";
+    }
+    payload << "\"" << EscapeJson(metadata.modules[index]) << "\"";
+  }
+  payload << "],\"tree\":[";
+  for (std::size_t index = 0; index < metadata.tree.size(); ++index) {
+    if (index > 0) {
+      payload << ",";
+    }
+    payload << WorkspaceTreePayload(metadata.tree[index]);
+  }
+  payload << "]}";
   return payload.str();
 }
 
@@ -213,9 +269,10 @@ int Application::Run() {
   protocol::MessageRouter router;
   protocol::RegisterHandlers(router);
   debug::DebuggerSession debugger_session;
+  workspace::ProjectMetadataLoader metadata_loader;
 
   protocol::WebSocketServer server;
-  server.SetMessageHandler([&router, &server, &debugger_session](std::string_view raw_message) {
+  server.SetMessageHandler([&router, &server, &debugger_session, &metadata_loader](std::string_view raw_message) {
     const std::string raw(raw_message);
     const auto type = ExtractJsonStringField(raw, "type");
     if (type.empty()) {
@@ -243,9 +300,12 @@ int Application::Run() {
         return;
       }
 
-      server.PublishMessage(Envelope(
-          "project.metadataLoaded",
-          "{\"name\":\"tinyos\",\"type\":\"oside.os-project\",\"toolchainPrefix\":\"x86_64-elf-\",\"includePaths\":[\"include\",\"modules\"],\"linkerScript\":\"linker.ld\",\"modules\":[\"kernel\"]}"));
+      const auto metadata = metadata_loader.LoadMetadata(root_path);
+      if (!metadata.has_value()) {
+        return;
+      }
+
+      server.PublishMessage(Envelope("project.metadataLoaded", ProjectMetadataPayload(*metadata)));
       return;
     }
 
@@ -369,9 +429,10 @@ int Application::Run() {
   const auto project_result = router.Dispatch("project.loadMetadata", sample_project_root);
   std::cout << "dispatch result for project.loadMetadata: " << (project_result.has_value() ? *project_result : "no handler") << std::endl;
 
-  server.PublishMessage(Envelope(
-      "project.metadataLoaded",
-      "{\"name\":\"tinyos\",\"type\":\"oside.os-project\",\"toolchainPrefix\":\"x86_64-elf-\",\"includePaths\":[\"include\",\"modules\"],\"linkerScript\":\"linker.ld\",\"modules\":[\"kernel\"]}"));
+  const auto startup_metadata = metadata_loader.LoadMetadata(sample_project_root);
+  if (startup_metadata.has_value()) {
+    server.PublishMessage(Envelope("project.metadataLoaded", ProjectMetadataPayload(*startup_metadata)));
+  }
 
   const bool one_shot_mode = std::getenv("OSIDE_ONESHOT") != nullptr;
   if (one_shot_mode) {

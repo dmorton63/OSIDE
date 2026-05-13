@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { PropsWithChildren, ReactNode } from 'react';
 
 import { useProtocol } from '../../protocol/hooks/ProtocolContext';
@@ -18,6 +18,11 @@ export type WorkspaceState = {
   modules: string[];
   rootPath: string;
   tree: WorkspaceNode[];
+};
+
+type WorkspaceContextValue = {
+  state: WorkspaceState;
+  loadProject: (rootPath: string) => void;
 };
 
 const initialWorkspaceState: WorkspaceState = {
@@ -69,7 +74,10 @@ const initialWorkspaceState: WorkspaceState = {
   ],
 };
 
-const WorkspaceContext = createContext<WorkspaceState>(initialWorkspaceState);
+const WorkspaceContext = createContext<WorkspaceContextValue>({
+  state: initialWorkspaceState,
+  loadProject: () => {},
+});
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -78,6 +86,24 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export function WorkspaceProvider({ children }: PropsWithChildren): ReactNode {
   const protocol = useProtocol();
   const [workspaceState, setWorkspaceState] = useState<WorkspaceState>(initialWorkspaceState);
+  const lastRequestedRootPathRef = useRef(initialWorkspaceState.rootPath);
+
+  const loadProject = (rootPath: string) => {
+    lastRequestedRootPathRef.current = rootPath;
+    protocol.sendMessage({
+      protocolVersion: '1.0.0',
+      type: 'project.loadMetadata',
+      payload: {
+        rootPath,
+      },
+    });
+  };
+
+  useEffect(() => {
+    if (protocol.connectionState === 'connected') {
+      loadProject(workspaceState.rootPath);
+    }
+  }, [protocol.connectionState]);
 
   useEffect(() => {
     protocol.registerHandler('project.metadataLoaded', (payload) => {
@@ -89,24 +115,51 @@ export function WorkspaceProvider({ children }: PropsWithChildren): ReactNode {
       const projectType = payload.type;
       const toolchainPrefix = payload.toolchainPrefix;
 
+      const parseTreeNode = (node: unknown): WorkspaceNode | null => {
+        if (!isRecord(node) || typeof node.name !== 'string' || typeof node.path !== 'string' || (node.kind !== 'directory' && node.kind !== 'file')) {
+          return null;
+        }
+
+        const children = Array.isArray(node.children)
+          ? node.children.map(parseTreeNode).filter((entry): entry is WorkspaceNode => entry !== null)
+          : undefined;
+
+        return {
+          name: node.name,
+          path: node.path,
+          kind: node.kind,
+          children,
+        };
+      };
+
+      const tree = Array.isArray(payload.tree)
+        ? payload.tree.map(parseTreeNode).filter((entry): entry is WorkspaceNode => entry !== null)
+        : undefined;
+
       setWorkspaceState((current) => ({
         ...current,
         projectName,
         projectType,
         toolchainPrefix,
+        rootPath: typeof payload.rootPath === 'string' ? payload.rootPath : current.rootPath,
         includePaths: Array.isArray(payload.includePaths)
           ? payload.includePaths.filter((entry): entry is string => typeof entry === 'string')
           : current.includePaths,
         modules: Array.isArray(payload.modules) ? payload.modules.filter((entry): entry is string => typeof entry === 'string') : current.modules,
+        tree: tree ?? current.tree,
       }));
     });
   }, [protocol]);
 
-  const value = useMemo(() => workspaceState, [workspaceState]);
+  const value = useMemo<WorkspaceContextValue>(() => ({ state: workspaceState, loadProject }), [workspaceState, loadProject]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }
 
 export function useWorkspaceState() {
-  return useContext(WorkspaceContext);
+  return useContext(WorkspaceContext).state;
+}
+
+export function useWorkspaceActions() {
+  return { loadProject: useContext(WorkspaceContext).loadProject };
 }

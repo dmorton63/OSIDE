@@ -1,5 +1,6 @@
 #include <citadel/workspace/ProjectMetadataLoader.hpp>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <optional>
@@ -69,39 +70,81 @@ std::optional<std::string> ReadFile(const std::filesystem::path& file_path) {
   return buffer.str();
 }
 
+ProjectTreeNode BuildTreeNode(const std::filesystem::path& project_root, const std::filesystem::path& path) {
+  ProjectTreeNode node;
+  node.name = path.filename().string();
+  node.path = std::filesystem::relative(path, project_root).generic_string();
+  node.is_directory = std::filesystem::is_directory(path);
+
+  if (!node.is_directory) {
+    return node;
+  }
+
+  std::vector<std::filesystem::path> children;
+  for (const auto& entry : std::filesystem::directory_iterator(path)) {
+    children.push_back(entry.path());
+  }
+
+  std::sort(children.begin(), children.end(), [](const auto& left, const auto& right) {
+    const bool left_directory = std::filesystem::is_directory(left);
+    const bool right_directory = std::filesystem::is_directory(right);
+    if (left_directory != right_directory) {
+      return left_directory > right_directory;
+    }
+
+    return left.filename().string() < right.filename().string();
+  });
+
+  for (const auto& child : children) {
+    node.children.push_back(BuildTreeNode(project_root, child));
+  }
+
+  return node;
+}
+
 } // namespace
 
 std::string ProjectMetadataLoader::Load(std::string_view root_path) const {
+  const auto metadata = LoadMetadata(root_path);
+  if (!metadata.has_value()) {
+    return "error: invalid project metadata";
+  }
+
+  std::ostringstream summary;
+  summary << "metadata loaded: " << metadata->name << " toolchain=" << metadata->toolchain_prefix << " includePaths="
+          << metadata->include_paths.size() << " modules=" << metadata->modules.size();
+  return summary.str();
+}
+
+std::optional<ProjectMetadata> ProjectMetadataLoader::LoadMetadata(std::string_view root_path) const {
   if (root_path.empty()) {
-    return "error: missing project root path";
+    return std::nullopt;
   }
 
   const auto project_root = ResolveProjectRoot(root_path);
   if (!std::filesystem::exists(project_root)) {
-    return "error: project root does not exist";
+    return std::nullopt;
   }
 
   constexpr const char* required_directories[] = {"src", "include", "modules", "boot", "build", "scripts"};
   for (const auto* directory : required_directories) {
     if (!std::filesystem::is_directory(project_root / directory)) {
-      return std::string("error: missing required directory ") + directory;
+      return std::nullopt;
     }
   }
 
   const auto project_file = project_root / "project.json";
   const auto linker_script = project_root / "linker.ld";
-  if (!std::filesystem::is_regular_file(project_file)) {
-    return "error: missing project.json";
-  }
-  if (!std::filesystem::is_regular_file(linker_script)) {
-    return "error: missing linker.ld";
+  if (!std::filesystem::is_regular_file(project_file) || !std::filesystem::is_regular_file(linker_script)) {
+    return std::nullopt;
   }
 
   const auto contents = ReadFile(project_file);
   if (!contents.has_value()) {
-    return "error: failed to read project.json";
+    return std::nullopt;
   }
 
+  ProjectMetadata metadata;
   const auto name = ParseStringField(*contents, "name");
   const auto type = ParseStringField(*contents, "type");
   const auto toolchain_prefix = ParseStringField(*contents, "toolchainPrefix");
@@ -111,21 +154,41 @@ std::string ProjectMetadataLoader::Load(std::string_view root_path) const {
 
   if (!name.has_value() || !type.has_value() || !toolchain_prefix.has_value() || !linker_script_path.has_value() ||
       !include_paths.has_value() || !modules.has_value()) {
-    return "error: invalid project metadata";
+    return std::nullopt;
   }
 
-  if (*type != "oside.os-project") {
-    return "error: unsupported project type";
+  if (*type != "oside.os-project" || !std::filesystem::exists(project_root / *linker_script_path)) {
+    return std::nullopt;
   }
 
-  if (!std::filesystem::exists(project_root / *linker_script_path)) {
-    return "error: linker script path does not resolve";
+  metadata.name = *name;
+  metadata.type = *type;
+  metadata.toolchain_prefix = *toolchain_prefix;
+  metadata.linker_script = *linker_script_path;
+  metadata.root_path = project_root.generic_string();
+  metadata.include_paths = *include_paths;
+  metadata.modules = *modules;
+
+  std::vector<std::filesystem::path> top_level_entries;
+  for (const auto& entry : std::filesystem::directory_iterator(project_root)) {
+    top_level_entries.push_back(entry.path());
   }
 
-  std::ostringstream summary;
-  summary << "metadata loaded: " << *name << " toolchain=" << *toolchain_prefix << " includePaths=" << include_paths->size()
-          << " modules=" << modules->size();
-  return summary.str();
-}
+  std::sort(top_level_entries.begin(), top_level_entries.end(), [](const auto& left, const auto& right) {
+    const bool left_directory = std::filesystem::is_directory(left);
+    const bool right_directory = std::filesystem::is_directory(right);
+    if (left_directory != right_directory) {
+      return left_directory > right_directory;
+    }
+
+    return left.filename().string() < right.filename().string();
+  });
+
+  for (const auto& entry : top_level_entries) {
+    metadata.tree.push_back(BuildTreeNode(project_root, entry));
+  }
+
+  return metadata;
+  }
 
 } // namespace citadel::workspace

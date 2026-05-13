@@ -4,6 +4,7 @@ import type { CSSProperties } from 'react';
 import { useProtocol } from '../../protocol/hooks/ProtocolContext';
 import { useDebugSession } from '../../debug/session/DebugSessionContext';
 import { useDebugSessionState } from '../../debug/session/DebugSessionContext';
+import { useWorkspaceActions } from '../../workspace/state/WorkspaceContext';
 import { useWorkspaceState } from '../../workspace/state/WorkspaceContext';
 import { BuildOutputPanel } from './BuildOutputPanel';
 import { DebugPanel } from './DebugPanel';
@@ -72,6 +73,7 @@ export function Workbench() {
   const protocol = useProtocol();
   const debugSession = useDebugSession();
   const debugState = useDebugSessionState();
+  const workspaceActions = useWorkspaceActions();
   const workspace = useWorkspaceState();
   const [layoutMode, setLayoutMode] = useState<LayoutMode>('editing');
   const shellStyle = createShellStyle(layoutMode);
@@ -124,9 +126,11 @@ export function Workbench() {
           projectName={workspace.projectName}
           connectionState={protocol.connectionState}
           activeLayout={layoutMode}
+          projectRootPath={workspace.rootPath}
           debugStatus={debugState.status}
           debugPendingCommand={debugState.pendingCommand}
           showDebugControls={showDebugControls}
+          onOpenProject={workspaceActions.loadProject}
           onLayoutChange={setLayoutMode}
           onBuild={handleBuild}
           onDebug={handleDebug}
