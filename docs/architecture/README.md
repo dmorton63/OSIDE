@@ -1,5 +1,9 @@
 # Architecture notes
 
+- [Look-ahead debugger](./LookAheadDebugger.md): future debugger-intelligence design and phased delivery plan.
+- [Sandbox value injection](./SandboxValueInjection.md): future isolated what-if analysis design.
+- [Traceback analysis](./TracebackAnalysis.md): future ranked-origin analysis design.
+
 ## Debugger architecture boundary
 
 The current debugger implementation is focused on reliable session control, pause state capture, and source/variable visibility. Advanced reasoning features such as look-ahead analysis, bad-value traceback, and hypothetical input testing are intentionally outside the present debugger boundary.
